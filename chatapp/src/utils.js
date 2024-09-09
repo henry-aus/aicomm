@@ -30,6 +30,13 @@ const initSSE = (store) => {
   let sse_base = getSseBase();
   let url = `${sse_base}?token=${store.state.token}`;
   const sse = new EventSource(url);
+  
+  let channelAlterListener = (e) => {
+    let data = JSON.parse(e.data);
+    console.log('message:', e.data);
+    delete data.event;
+    store.commit('addChannel', data);
+  }
 
   sse.addEventListener("NewMessage", (e) => {
     let data = JSON.parse(e.data);
@@ -37,6 +44,11 @@ const initSSE = (store) => {
     delete data.event;
     store.commit('addMessage', { channelId: data.chatId, message: data });
   });
+
+ 
+  sse.addEventListener("NewChat", channelAlterListener);
+
+  sse.addEventListener("AddToChat", channelAlterListener);
 
   sse.onmessage = (event) => {
     console.log('got event:', event);
@@ -54,7 +66,7 @@ const initSSE = (store) => {
 
 export {
   getUrlBase,
-  initSSE,
+  initSSE
 };
 
 export function formatMessageDate(timestamp) {

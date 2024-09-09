@@ -1,9 +1,7 @@
-import { createStore } from 'vuex';
 import axios from 'axios';
 import { jwtDecode } from "jwt-decode";
-import { getUrlBase } from '../utils';
-import { initSSE } from '../utils';
-import { formatMessageDate } from '../utils'; // Add this import
+import { createStore } from 'vuex';
+import { formatMessageDate, getUrlBase, initSSE } from '../utils';
 
 export default createStore({
   state: {
@@ -155,12 +153,31 @@ export default createStore({
     setActiveChannel({ commit }, channel) {
       commit('setActiveChannel', channel);
     },
-    addChannel({ commit }, channel) {
-      commit('addChannel', channel);
-
-      // Update the channels and messages in local storage
-      localStorage.setItem('channels', JSON.stringify(this.state.channels));
-      localStorage.setItem('messages', JSON.stringify(this.state.messages));
+    async addChannel({ state, commit }, channel) {
+      try {
+        const response = await axios.post(`${getUrlBase()}/chats/`, channel, {
+          headers: {
+            Authorization: `Bearer ${state.token}`,
+          },
+        });
+        console.log('Chat created:', response.data);
+         } catch (error) {
+        console.error('Failed to create chat:', error);
+        throw error;
+      }
+    },
+    async updateChannel({ state, commit }, { channelId, channel }) {
+      try {
+        const response = await axios.patch(`${getUrlBase()}/chats/${channelId}`, channel, {
+          headers: {
+            Authorization: `Bearer ${state.token}`,
+          },
+        });
+        console.log('Chat updated:', response.data);
+         } catch (error) {
+        console.error('Failed to update chat:', error);
+        throw error;
+      }
     },
     async fetchMessagesForChannel({ state, commit }, channelId) {
       if (!state.messages[channelId] || state.messages[channelId].length === 0) {

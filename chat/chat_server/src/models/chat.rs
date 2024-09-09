@@ -1,4 +1,5 @@
 use crate::{AppError, AppState};
+use anyhow::anyhow;
 use chat_core::{Chat, ChatType};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -18,41 +19,9 @@ impl AppState {
         user_id: u64,
         ws_id: u64,
     ) -> Result<Chat, AppError> {
+        self.valid_chat_dto(user_id, &input).await?;
+
         let len = input.members.len();
-        if len < 2 {
-            return Err(AppError::CreateChatError(
-                "Chat must have at least 2 members".to_string(),
-            ));
-        }
-
-        // if user id is not in members, reject
-        if !input.members.contains(&(user_id as i64)) {
-            return Err(AppError::CreateChatError(
-                "You must be a member of the chat".to_string(),
-            ));
-        }
-
-        if let Some(name) = &input.name {
-            if name.len() < 3 {
-                return Err(AppError::CreateChatError(
-                    "Chat name must have at least 3 characters".to_string(),
-                ));
-            }
-        }
-
-        if len > 8 && input.name.is_none() {
-            return Err(AppError::CreateChatError(
-                "Group chat with more than 8 members must have a name".to_string(),
-            ));
-        }
-
-        // verify if all members exist
-        let users = self.fetch_chat_user_by_ids(&input.members).await?;
-        if users.len() != len {
-            return Err(AppError::CreateChatError(
-                "Some members do not exist".to_string(),
-            ));
-        }
 
         let chat_type = match (&input.name, len) {
             (None, 2) => ChatType::Single,
@@ -127,6 +96,112 @@ impl AppState {
         .await?;
 
         Ok(is_member.is_some())
+    }
+
+    pub async fn update_chat(
+        &self,
+        chat_id: u64,
+        user_id: u64,
+        input: CreateChat,
+    ) -> Result<Option<Chat>, AppError> {
+        self.valid_chat_dto(user_id, &input).await?;
+        let chat_type = get_chat_type(&input);
+        let chat = sqlx::query_as(
+            r#"
+            UPDATE chats SET name = $1, type = $2, members = $3
+            WHERE id = $4
+            RETURNING id, ws_id, name, type, members, created_at
+            "#,
+        )
+        .bind(input.name)
+        .bind(chat_type)
+        .bind(input.members)
+        .bind(chat_id as i64)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(chat)
+    }
+
+    async fn valid_chat_dto(&self, user_id: u64, input: &CreateChat) -> Result<(), AppError> {
+        let len = input.members.len();
+        if len < 2 {
+            return Err(AppError::CreateChatError(
+                "Chat must have at least 2 members".to_string(),
+            ));
+        }
+
+        // if user id is not in members, reject
+        if !input.members.contains(&(user_id as i64)) {
+            return Err(AppError::CreateChatError(
+                "You must be a member of the chat".to_string(),
+            ));
+        }
+
+        if let Some(name) = &input.name {
+            if name.len() < 3 {
+                return Err(AppError::CreateChatError(
+                    "Chat name must have at least 3 characters".to_string(),
+                ));
+            }
+        }
+
+        if len > 8 && input.name.is_none() {
+            return Err(AppError::CreateChatError(
+                "Group chat with more than 8 members must have a name".to_string(),
+            ));
+        }
+
+        // verify if all members exist
+        let users = self.fetch_chat_user_by_ids(&input.members).await?;
+        if users.len() != len {
+            return Err(AppError::CreateChatError(
+                "Some members do not exist".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    pub async fn delete_chat(&self, chat_id: u64, user_id: u64) -> Result<Option<u64>, AppError> {
+        let chat = self.get_chat_by_id(chat_id).await?;
+        let chat = match chat {
+            Some(chat) => chat,
+            None => return Ok(None),
+        };
+
+        if !chat.members.contains(&(user_id as i64)) {
+            return Err(AppError::AnyError(anyhow!(
+                "You must be a member of the chat to delete it"
+            )));
+        }
+
+        let chat_id: Option<(i64,)> = sqlx::query_as(
+            r#"
+            DELETE FROM chats
+            WHERE id = $1
+            RETURNING id
+            "#,
+        )
+        .bind(chat_id as i64)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(chat_id.map(|r| r.0 as u64))
+    }
+}
+
+fn get_chat_type(input: &CreateChat) -> ChatType {
+    match (&input.name, &input.members.len()) {
+        (None, 2) => ChatType::Single,
+        (None, _) => ChatType::Group,
+        (Some(_), _) => {
+            if input.public {
+                ChatType::PublicChannel
+            } else {
+                ChatType::PrivateChannel
+            }
+        }
     }
 }
 

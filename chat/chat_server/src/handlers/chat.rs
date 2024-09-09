@@ -74,12 +74,58 @@ pub(crate) async fn get_chat_handler(
     }
 }
 
-// TODO: finish this as a homework
-pub(crate) async fn update_chat_handler() -> impl IntoResponse {
-    "update chat"
+#[utoipa::path(
+    patch,
+    path = "/api/chats/{id}",
+    params(
+        ("id" = u64, Path, description = "Chat id"),
+    ),
+    request_body = CreateChat,
+    responses(
+        (status = 200, description = "Chat is updated", body = Chat),
+        (status = 404, description = "Chat not found", body = ErrorOutput),
+    ),
+    security(
+        ("token" = [])
+    ),
+    tag = "chat"
+)]
+pub(crate) async fn update_chat_handler(
+    Extension(user): Extension<User>,
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+    Json(input): Json<CreateChat>,
+) -> impl IntoResponse {
+    let chat = state.update_chat(id as _, user.id as _, input).await?;
+    match chat {
+        Some(chat) => Ok(Json(chat)),
+        None => Err(AppError::NotFound(format!("chat id {id}"))),
+    }
 }
 
-// TODO: finish this as a homework
-pub(crate) async fn delete_chat_handler() -> impl IntoResponse {
-    "delete chat"
+#[utoipa::path(
+    delete,
+    path = "/api/chats/{id}",
+    params(
+        ("id" = u64, Path, description = "Chat id"),
+    ),
+    responses(
+        (status = 200, description = "Chat is deleted", body = String),
+        (status = 404, description = "Chat not found", body = ErrorOutput),
+    ),
+    security(
+        ("token" = [])
+    ),
+    tag = "chat"
+)]
+pub(crate) async fn delete_chat_handler(
+    Extension(user): Extension<User>,
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+) -> impl IntoResponse {
+    let chat_id = state.delete_chat(id as _, user.id as _).await?;
+    match chat_id {
+        Some(_) => Ok(format!("chat id {} has been deleted", id)),
+        None => Err(AppError::NotFound(format!("chat id {id}"))),
+    }
 }
